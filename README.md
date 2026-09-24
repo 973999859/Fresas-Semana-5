@@ -1,6 +1,6 @@
-# Mango Vision
+# Fresa Vision
 
-Analizador web de mangos conectado al modelo de Teachable Machine.
+Analizador web de fresas conectado al modelo de Teachable Machine.
 
 ## Uso local
 
@@ -14,15 +14,15 @@ Después visita la URL que muestre el comando. También puedes subir una imagen 
 
 ## Publicar en GitHub Pages
 
-1. Crea un repositorio vacío en GitHub, por ejemplo `mango-vision`.
+1. Crea un repositorio vacío en GitHub, por ejemplo `fresa-vision`.
 2. Desde esta carpeta ejecuta:
 
 ```bash
 git init
 git add .
-git commit -m "Crear analizador de mangos con IA"
+git commit -m "Crear analizador de fresas con IA"
 git branch -M main
-git remote add origin https://github.com/TU_USUARIO/mango-vision.git
+git remote add origin https://github.com/TU_USUARIO/fresa-vision.git
 git push -u origin main
 ```
 

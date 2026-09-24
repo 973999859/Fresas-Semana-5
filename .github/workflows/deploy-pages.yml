@@ -1,4 +1,4 @@
-name: Deploy Mango Vision to GitHub Pages
+name: Deploy Fresa Vision to GitHub Pages
 
 on:
   push:
