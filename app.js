@@ -1,107 +1,172 @@
-const MODEL_URL = 'https://teachablemachine.withgoogle.com/models/acj_H8Np2/';
+const URL = 'https://teachablemachine.withgoogle.com/models/lzr9KdndI/';
 
 let model;
 let webcam;
-let animationFrame;
-let classCount = 0;
+let labelContainer;
+let maxPredictions;
+let animationFrameId;
 
 const elements = {
   status: document.getElementById('model-status'),
-  cameraButton: document.getElementById('camera-button'),
-  fileInput: document.getElementById('file-input'),
-  stopCamera: document.getElementById('stop-camera'),
-  empty: document.getElementById('preview-empty'),
   webcam: document.getElementById('webcam-container'),
-  preview: document.getElementById('image-preview'),
+  imagePreview: document.getElementById('image-preview'),
+  empty: document.getElementById('preview-empty'),
   scan: document.getElementById('scan-line'),
   mode: document.getElementById('input-mode'),
   state: document.getElementById('result-state'),
   labels: document.getElementById('label-container'),
   count: document.getElementById('prediction-count'),
+  fileInput: document.getElementById('file-input'),
 };
 
-async function loadModel() {
-  elements.status.textContent = 'Cargando modelo...';
-  try {
-    model = await tmImage.load(`${MODEL_URL}model.json`, `${MODEL_URL}metadata.json`);
-    classCount = model.getTotalClasses();
-    elements.status.textContent = 'Modelo listo para analizar';
-  } catch (error) {
-    elements.status.textContent = 'No se pudo cargar el modelo';
-    elements.status.parentElement.classList.add('error');
-    elements.state.innerHTML = '<h3>Modelo no disponible</h3><p>Comprueba tu conexión y vuelve a cargar la página.</p>';
-    console.error('Error loading Teachable Machine model:', error);
+function stopWebcam() {
+  if (animationFrameId) {
+    cancelAnimationFrame(animationFrameId);
+    animationFrameId = null;
+  }
+
+  if (webcam) {
+    webcam.stop();
+    webcam = null;
+  }
+
+  if (elements.webcam) {
+    elements.webcam.innerHTML = '';
   }
 }
 
-async function startCamera() {
-  if (!model) return;
-  stopCamera();
+function renderPredictions(prediction) {
+  const sortedPrediction = [...prediction].sort((a, b) => b.probability - a.probability);
+  const top = sortedPrediction[0];
+  const percent = (top.probability * 100).toFixed(1);
+
+  elements.count.textContent = `${percent}%`;
+  elements.labels.innerHTML = sortedPrediction.map((item) => {
+    const probability = (item.probability * 100).toFixed(1);
+    return `
+      <div class="prediction">
+        <div class="prediction-top">
+          <strong>${item.className}</strong>
+          <span>${probability}%</span>
+        </div>
+        <div class="meter">
+          <i style="width: ${probability}%"></i>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  if (elements.state) {
+    elements.state.innerHTML = `
+      <div class="result-orbit"><span></span></div>
+      <h3>${top.className}</h3>
+      <p>Confianza: ${percent}%</p>
+    `;
+  }
+}
+
+async function init() {
+  const isSecureContext = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+
+  if (!isSecureContext) {
+    elements.status.textContent = 'Abre la app desde http://localhost:8000 o HTTPS';
+    if (elements.state) {
+      elements.state.innerHTML = '<h3>Servidor necesario</h3><p>Chrome exige abrir la aplicación desde localhost o HTTPS para usar la cámara y el modelo.</p>';
+    }
+    return;
+  }
+
+  if (!window.tmImage) {
+    elements.status.textContent = 'No se cargó Teachable Machine';
+    return;
+  }
+
+  const modelURL = URL + 'model.json';
+  const metadataURL = URL + 'metadata.json';
+
   try {
-    webcam = new tmImage.Webcam(480, 360, true);
+    if (!model) {
+      elements.status.textContent = 'Cargando modelo...';
+      model = await tmImage.load(modelURL, metadataURL);
+      maxPredictions = model.getTotalClasses();
+    }
+
+    stopWebcam();
+    const flip = true;
+    webcam = new tmImage.Webcam(320, 240, flip);
     await webcam.setup();
     await webcam.play();
-    elements.empty.hidden = true;
-    elements.preview.hidden = true;
-    elements.webcam.hidden = false;
-    elements.scan.hidden = false;
-    elements.cameraButton.hidden = true;
-    elements.stopCamera.hidden = false;
+
+    elements.empty.style.display = 'none';
+    if (elements.imagePreview) elements.imagePreview.hidden = true;
+    elements.scan.style.display = 'block';
     elements.mode.textContent = 'Cámara activa';
-    updateCameraFrame();
+    elements.webcam.innerHTML = '';
+    elements.webcam.appendChild(webcam.canvas);
+
+    labelContainer = document.getElementById('label-container');
+    labelContainer.innerHTML = '';
+    for (let i = 0; i < maxPredictions; i++) {
+      const row = document.createElement('div');
+      row.className = 'prediction';
+      labelContainer.appendChild(row);
+    }
+
+    elements.status.textContent = 'Modelo listo';
+    animationFrameId = requestAnimationFrame(loop);
   } catch (error) {
-    elements.status.textContent = 'Permiso de cámara necesario';
-    elements.state.innerHTML = '<h3>No se pudo abrir la cámara</h3><p>Concede permiso o sube una imagen para continuar.</p>';
-    console.error('Camera error:', error);
+    elements.status.textContent = 'No se pudo cargar el modelo';
+    console.error(error);
+    if (elements.state) {
+      elements.state.innerHTML = '<h3>Modelo no disponible</h3><p>Verifica la conexión y vuelve a intentar.</p>';
+    }
   }
 }
 
-function updateCameraFrame() {
+async function loop() {
   if (!webcam) return;
   webcam.update();
-  predict(webcam.canvas);
-  animationFrame = window.requestAnimationFrame(updateCameraFrame);
+  await predict();
+  animationFrameId = requestAnimationFrame(loop);
 }
 
-function stopCamera() {
-  if (animationFrame) window.cancelAnimationFrame(animationFrame);
-  if (webcam) webcam.stop();
-  webcam = null;
-  elements.webcam.hidden = true;
-  elements.scan.hidden = true;
-  elements.cameraButton.hidden = false;
-  elements.stopCamera.hidden = true;
+async function predict() {
+  if (!model || !webcam || !labelContainer) return;
+  const prediction = await model.predict(webcam.canvas);
+  renderPredictions(prediction);
 }
 
-function handleFile(event) {
+async function handleFile(event) {
   const [file] = event.target.files;
   if (!file) return;
-  stopCamera();
+
+  stopWebcam();
+
   const reader = new FileReader();
-  reader.onload = () => {
-    elements.preview.src = reader.result;
-    elements.preview.hidden = false;
-    elements.empty.hidden = true;
+  reader.onload = async () => {
+    elements.imagePreview.src = reader.result;
+    elements.imagePreview.hidden = false;
+    elements.empty.style.display = 'none';
+    elements.scan.style.display = 'block';
     elements.mode.textContent = 'Imagen cargada';
-    elements.scan.hidden = false;
-    elements.preview.onload = () => predict(elements.preview);
+
+    if (!model) {
+      elements.status.textContent = 'Cargando modelo...';
+      model = await tmImage.load(URL + 'model.json', URL + 'metadata.json');
+      maxPredictions = model.getTotalClasses();
+      elements.status.textContent = 'Modelo listo';
+    }
+
+    const predictions = await model.predict(elements.imagePreview);
+    renderPredictions(predictions);
   };
   reader.readAsDataURL(file);
 }
 
-async function predict(source) {
-  if (!model || !source) return;
-  const predictions = await model.predict(source);
-  predictions.sort((first, second) => second.probability - first.probability);
-  elements.state.hidden = true;
-  elements.count.textContent = `${Math.round(predictions[0].probability * 100)}%`;
-  elements.labels.innerHTML = predictions.map((prediction) => {
-    const percentage = Math.round(prediction.probability * 100);
-    return `<div class="prediction"><div class="prediction-top"><strong>${prediction.className}</strong><span>${percentage}%</span></div><div class="meter"><i style="width: ${percentage}%"></i></div></div>`;
-  }).join('');
+if (elements.fileInput) {
+  elements.fileInput.addEventListener('change', handleFile);
 }
 
-elements.cameraButton.addEventListener('click', startCamera);
-elements.stopCamera.addEventListener('click', stopCamera);
-elements.fileInput.addEventListener('change', handleFile);
-loadModel();
+if (elements.status) {
+  elements.status.textContent = 'Modelo listo para cargar';
+}
